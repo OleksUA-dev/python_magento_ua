@@ -9,6 +9,7 @@ from ..exceptions import (
     NetworkError,
     TimeoutError,
     ConnectionError,
+    HTTPError,
     create_http_exception
 )
 
