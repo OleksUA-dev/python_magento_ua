@@ -1,697 +1,853 @@
-"""Валідація даних для Magento API."""
+"""
+Валідатори для Magento бібліотеки.
+"""
 
 import re
-from typing import Any, List, Dict, Optional
-from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, List, Optional, Union
 
 
 class ValidationError(Exception):
-    """Помилка валідації."""
+    """Виняток для помилок валідації."""
 
-    def __init__(self, message: str, field: Optional[str] = None, value: Any = None):
-        super().__init__(message)
-        self.field = field
-        self.value = value
+    def __init__(self, message: str, field: Optional[str] = None):
         self.message = message
-
-    def __str__(self) -> str:
-        if self.field:
-            return f"Validation error for field '{self.field}': {self.message}"
-        return f"Validation error: {self.message}"
+        self.field = field
+        super().__init__(message)
 
 
-def validate_sku(sku: str) -> str:
+def validate_sku(sku: str) -> bool:
     """
-    Валідація SKU товару.
+    Валідує SKU товару.
 
     Args:
         sku: SKU для валідації
 
     Returns:
-        Валідний SKU
+        True якщо SKU валідний
 
     Raises:
-        ValidationError: Якщо SKU невалідний
+        ValidationError: Якщо SKU не валідний
     """
     if not sku:
-        raise ValidationError("SKU не може бути порожнім", field="sku", value=sku)
+        raise ValidationError("SKU не може бути порожнім", "sku")
 
     if not isinstance(sku, str):
-        raise ValidationError("SKU має бути рядком", field="sku", value=sku)
+        raise ValidationError("SKU має бути рядком", "sku")
 
-    # SKU не може містити пробіли
-    if ' ' in sku:
-        raise ValidationError("SKU не може містити пробіли", field="sku", value=sku)
+    if len(sku) < 1 or len(sku) > 64:
+        raise ValidationError("SKU має бути від 1 до 64 символів", "sku")
 
-    # Максимальна довжина SKU в Magento
-    if len(sku) > 64:
-        raise ValidationError("SKU не може бути довшим за 64 символи", field="sku", value=sku)
-
-    # Дозволені символи: літери, цифри, дефіс, підкреслення
+    # SKU може містити літери, цифри, дефіси та підкреслення
     if not re.match(r'^[a-zA-Z0-9_-]+$', sku):
         raise ValidationError(
-            "SKU може містити тільки літери, цифри, дефіс та підкреслення",
-            field="sku", value=sku
+            "SKU може містити тільки літери, цифри, дефіси та підкреслення",
+            "sku"
         )
 
-    return sku.strip()
+    return True
 
 
-def validate_email(email: str) -> str:
+def validate_email_address(email: str) -> bool:
     """
-    Валідація email адреси.
+    Валідує email адресу.
 
     Args:
         email: Email для валідації
 
     Returns:
-        Валідний email
+        True якщо email валідний
 
     Raises:
-        ValidationError: Якщо email невалідний
+        ValidationError: Якщо email не валідний
     """
     if not email:
-        raise ValidationError("Email не може бути порожнім", field="email", value=email)
+        raise ValidationError("Email не може бути порожнім", "email")
 
     if not isinstance(email, str):
-        raise ValidationError("Email має бути рядком", field="email", value=email)
+        raise ValidationError("Email має бути рядком", "email")
 
-    # Простий regex для email
-    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    if not re.match(email_pattern, email):
-        raise ValidationError("Невалідний формат email", field="email", value=email)
-
-    return email.lower().strip()
+    # Базова регулярка для email
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
 
 
-def validate_phone(phone: str) -> str:
+def validate_phone(phone: str, country_code: str = "UA") -> bool:
     """
-    Валідація номера телефону.
+    Валідує номер телефону.
 
     Args:
-        phone: Номер телефону для валідації
+        phone: Номер телефону
+        country_code: Код країни
 
     Returns:
-        Валідний номер телефону
+        True якщо номер валідний
 
     Raises:
-        ValidationError: Якщо номер невалідний
+        ValidationError: Якщо номер не валідний
     """
     if not phone:
-        raise ValidationError("Номер телефону не може бути порожнім", field="phone", value=phone)
+        raise ValidationError("Номер телефону не може бути порожнім", "phone")
 
-    if not isinstance(phone, str):
-        raise ValidationError("Номер телефону має бути рядком", field="phone", value=phone)
+    # Видаляємо всі символи крім цифр і +
+    clean_phone = re.sub(r'[^\d+]', '', phone)
 
-    # Очистити номер від пробілів, дефісів та дужок
-    clean_phone = re.sub(r'[\s\-\(\)]', '', phone)
+    if country_code == "UA":
+        # Українські номери: +380XXXXXXXXX або 380XXXXXXXXX або 0XXXXXXXXX
+        patterns = [
+            r'^\+380\d{9}$',  # +380XXXXXXXXX
+            r'^380\d{9}$',    # 380XXXXXXXXX
+            r'^0\d{9}$'       # 0XXXXXXXXX
+        ]
 
-    # Перевірити, що залишилися тільки цифри та можливо + на початку
-    if not re.match(r'^\+?[0-9]{7,15}$', clean_phone):
-        raise ValidationError(
-            "Номер телефону має містити від 7 до 15 цифр",
-            field="phone", value=phone
-        )
+        if not any(re.match(pattern, clean_phone) for pattern in patterns):
+            raise ValidationError(
+                "Невалідний український номер телефону. "
+                "Формат: +380XXXXXXXXX, 380XXXXXXXXX або 0XXXXXXXXX",
+                "phone"
+            )
+    else:
+        # Загальна перевірка міжнародних номерів
+        if not re.match(r'^\+?\d{7,15}$', clean_phone):
+            raise ValidationError(
+                "Невалідний номер телефону. Має містити від 7 до 15 цифр",
+                "phone"
+            )
 
-    return clean_phone
+    return True
 
 
-def validate_price(price: Any) -> Decimal:
+def validate_price(price: Union[int, float, str]) -> bool:
     """
-    Валідація ціни.
+    Валідує ціну.
 
     Args:
         price: Ціна для валідації
 
     Returns:
-        Валідна ціна як Decimal
+        True якщо ціна валідна
 
     Raises:
-        ValidationError: Якщо ціна невалідна
+        ValidationError: Якщо ціна не валідна
     """
     if price is None:
-        raise ValidationError("Ціна не може бути None", field="price", value=price)
+        raise ValidationError("Ціна не може бути None", "price")
 
     try:
-        decimal_price = Decimal(str(price))
-    except (InvalidOperation, ValueError):
-        raise ValidationError("Невалідний формат ціни", field="price", value=price)
+        price_float = float(price)
+    except (ValueError, TypeError):
+        raise ValidationError("Ціна має бути числом", "price")
 
-    if decimal_price < 0:
-        raise ValidationError("Ціна не може бути від'ємною", field="price", value=price)
+    if price_float < 0:
+        raise ValidationError("Ціна не може бути від'ємною", "price")
 
-    # Перевірити кількість знаків після коми (зазвичай максимум 4)
-    if decimal_price.as_tuple().exponent < -4:
-        raise ValidationError("Ціна може мати максимум 4 знаки після коми", field="price", value=price)
+    if price_float > 999999999.99:
+        raise ValidationError("Ціна занадто велика", "price")
 
-    return decimal_price
+    # Перевіряємо кількість десяткових знаків
+    price_str = str(price_float)
+    if '.' in price_str:
+        decimal_places = len(price_str.split('.')[1])
+        if decimal_places > 4:
+            raise ValidationError("Ціна може мати максимум 4 десяткові знаки", "price")
+
+    return True
 
 
-def validate_quantity(qty: Any) -> int:
+def validate_weight(weight: Union[int, float, str]) -> bool:
     """
-    Валідація кількості.
+    Валідує вагу товару.
 
     Args:
-        qty: Кількість для валідації
+        weight: Вага для валідації
 
     Returns:
-        Валідна кількість
+        True якщо вага валідна
 
     Raises:
-        ValidationError: Якщо кількість невалідна
+        ValidationError: Якщо вага не валідна
     """
-    if qty is None:
-        raise ValidationError("Кількість не може бути None", field="qty", value=qty)
+    if weight is None:
+        return True  # Вага може бути None
 
     try:
-        int_qty = int(qty)
+        weight_float = float(weight)
     except (ValueError, TypeError):
-        raise ValidationError("Кількість має бути цілим числом", field="qty", value=qty)
+        raise ValidationError("Вага має бути числом", "weight")
 
-    if int_qty < 0:
-        raise ValidationError("Кількість не може бути від'ємною", field="qty", value=qty)
+    if weight_float < 0:
+        raise ValidationError("Вага не може бути від'ємною", "weight")
 
-    return int_qty
+    if weight_float > 999999:
+        raise ValidationError("Вага занадто велика", "weight")
+
+    return True
 
 
-def validate_status(status: Any) -> int:
+def validate_status(status: Union[int, str]) -> bool:
     """
-    Валідація статусу товару.
+    Валідує статус товару.
 
     Args:
-        status: Статус для валідації
+        status: Статус (1 - активний, 2 - неактивний)
 
     Returns:
-        Валідний статус
+        True якщо статус валідний
 
     Raises:
-        ValidationError: Якщо статус невалідний
+        ValidationError: Якщо статус не валідний
     """
-    if status is None:
-        raise ValidationError("Статус не може бути None", field="status", value=status)
-
     try:
-        int_status = int(status)
+        status_int = int(status)
     except (ValueError, TypeError):
-        raise ValidationError("Статус має бути цілим числом", field="status", value=status)
+        raise ValidationError("Статус має бути числом", "status")
 
-    if int_status not in [1, 2]:  # 1 = enabled, 2 = disabled
-        raise ValidationError("Статус має бути 1 (enabled) або 2 (disabled)", field="status", value=status)
+    if status_int not in [1, 2]:
+        raise ValidationError("Статус має бути 1 (активний) або 2 (неактивний)", "status")
 
-    return int_status
+    return True
 
 
-def validate_visibility(visibility: Any) -> int:
+def validate_visibility(visibility: Union[int, str]) -> bool:
     """
-    Валідація видимості товару.
+    Валідує видимість товару.
 
     Args:
-        visibility: Видимість для валідації
+        visibility: Видимість (1-4)
 
     Returns:
-        Валідна видимість
+        True якщо видимість валідна
 
     Raises:
-        ValidationError: Якщо видимість невалідна
+        ValidationError: Якщо видимість не валідна
     """
-    if visibility is None:
-        raise ValidationError("Видимість не може бути None", field="visibility", value=visibility)
-
     try:
-        int_visibility = int(visibility)
+        visibility_int = int(visibility)
     except (ValueError, TypeError):
-        raise ValidationError("Видимість має бути цілим числом", field="visibility", value=visibility)
+        raise ValidationError("Видимість має бути числом", "visibility")
 
-    if int_visibility not in [1, 2, 3, 4]:  # 1=Not Visible, 2=Catalog, 3=Search, 4=Catalog+Search
+    # 1 - Not Visible Individually
+    # 2 - Catalog
+    # 3 - Search
+    # 4 - Catalog, Search
+    if visibility_int not in [1, 2, 3, 4]:
+        raise ValidationError("Видимість має бути від 1 до 4", "visibility")
+
+    return True
+
+
+def validate_url_key(url_key: str) -> bool:
+    """
+    Валідує URL ключ.
+
+    Args:
+        url_key: URL ключ для валідації
+
+    Returns:
+        True якщо URL ключ валідний
+
+    Raises:
+        ValidationError: Якщо URL ключ не валідний
+    """
+    if not url_key:
+        return True  # URL ключ може бути порожнім
+
+    if not isinstance(url_key, str):
+        raise ValidationError("URL ключ має бути рядком", "url_key")
+
+    if len(url_key) > 255:
+        raise ValidationError("URL ключ занадто довгий (максимум 255 символів)", "url_key")
+
+    # URL ключ може містити тільки літери, цифри та дефіси
+    if not re.match(r'^[a-z0-9-]+$', url_key):
         raise ValidationError(
-            "Видимість має бути 1 (Not Visible), 2 (Catalog), 3 (Search) або 4 (Catalog+Search)",
-            field="visibility", value=visibility
+            "URL ключ може містити тільки малі літери, цифри та дефіси",
+            "url_key"
         )
 
-    return int_visibility
+    # Не може починатися або закінчуватися дефісом
+    if url_key.startswith('-') or url_key.endswith('-'):
+        raise ValidationError(
+            "URL ключ не може починатися або закінчуватися дефісом",
+            "url_key"
+        )
 
+    # Не може містити подвійні дефіси
+    if '--' in url_key:
+        raise ValidationError("URL ключ не може містити подвійні дефіси", "url_key")
 
-class ProductValidator:
-    """Валідатор для товарів."""
+    return True
 
-    @staticmethod
-    def validate_product_data(data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Валідація даних товару.
 
-        Args:
-            data: Дані товару для валідації
-
-        Returns:
-            Валідні дані товару
-
-        Raises:
-            ValidationError: Якщо дані невалідні
-        """
-        validated_data = {}
-
-        # Обов'язкові поля
-        if 'sku' not in data:
-            raise ValidationError("SKU є обов'язковим полем", field="sku")
-        validated_data['sku'] = validate_sku(data['sku'])
-
-        if 'name' not in data:
-            raise ValidationError("Назва товару є обов'язковим полем", field="name")
-        if not data['name'].strip():
-            raise ValidationError("Назва товару не може бути порожньою", field="name")
-        validated_data['name'] = data['name'].strip()
-
-        # Додаткові поля
-        if 'price' in data:
-            validated_data['price'] = validate_price(data['price'])
-
-        if 'status' in data:
-            validated_data['status'] = validate_status(data['status'])
-
-        if 'visibility' in data:
-            validated_data['visibility'] = validate_visibility(data['visibility'])
-
-        if 'weight' in data and data['weight'] is not None:
-            validated_data['weight'] = validate_price(
-                data['weight'])  # Використовуємо validate_price для позитивних чисел
-
-        # Копіювати інші поля без змін
-        for key, value in data.items():
-            if key not in validated_data:
-                validated_data[key] = value
-
-        return validated_data
-
-
-class CustomerValidator:
-    """Валідатор для клієнтів."""
-
-    @staticmethod
-    def validate_customer_data(data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Валідація даних клієнта.
-
-        Args:
-            data: Дані клієнта для валідації
-
-        Returns:
-            Валідні дані клієнта
-
-        Raises:
-            ValidationError: Якщо дані невалідні
-        """
-        validated_data = {}
-
-        # Обов'язкові поля
-        if 'email' not in data:
-            raise ValidationError("Email є обов'язковим полем", field="email")
-        validated_data['email'] = validate_email(data['email'])
-
-        if 'firstname' not in data:
-            raise ValidationError("Ім'я є обов'язковим полем", field="firstname")
-        if not data['firstname'].strip():
-            raise ValidationError("Ім'я не може бути порожнім", field="firstname")
-        validated_data['firstname'] = data['firstname'].strip()
-
-        if 'lastname' not in data:
-            raise ValidationError("Прізвище є обов'язковим полем", field="lastname")
-        if not data['lastname'].strip():
-            raise ValidationError("Прізвище не може бути порожнім", field="lastname")
-        validated_data['lastname'] = data['lastname'].strip()
-
-        # Додаткові поля
-        if 'middlename' in data and data['middlename']:
-            validated_data['middlename'] = data['middlename'].strip()
-
-        if 'prefix' in data and data['prefix']:
-            validated_data['prefix'] = data['prefix'].strip()
-
-        if 'suffix' in data and data['suffix']:
-            validated_data['suffix'] = data['suffix'].strip()
-
-        if 'dob' in data and data['dob']:
-            # Валідація дати народження
-            from datetime import datetime
-            try:
-                if isinstance(data['dob'], str):
-                    datetime.fromisoformat(data['dob'])
-                validated_data['dob'] = data['dob']
-            except ValueError:
-                raise ValidationError("Невалідний формат дати народження", field="dob", value=data['dob'])
-
-        if 'gender' in data and data['gender'] is not None:
-            gender = int(data['gender'])
-            if gender not in [1, 2, 3]:  # 1=Male, 2=Female, 3=Not Specified
-                raise ValidationError("Стать має бути 1 (чоловіча), 2 (жіноча) або 3 (не вказано)", field="gender",
-                                      value=data['gender'])
-            validated_data['gender'] = gender
-
-        if 'group_id' in data:
-            group_id = int(data['group_id'])
-            if group_id < 0:
-                raise ValidationError("ID групи клієнтів не може бути від'ємним", field="group_id",
-                                      value=data['group_id'])
-            validated_data['group_id'] = group_id
-
-        if 'store_id' in data:
-            store_id = int(data['store_id'])
-            if store_id < 0:
-                raise ValidationError("ID магазину не може бути від'ємним", field="store_id", value=data['store_id'])
-            validated_data['store_id'] = store_id
-
-        if 'website_id' in data:
-            website_id = int(data['website_id'])
-            if website_id < 0:
-                raise ValidationError("ID веб-сайту не може бути від'ємним", field="website_id",
-                                      value=data['website_id'])
-            validated_data['website_id'] = website_id
-
-        # Валідація адрес
-        if 'addresses' in data and data['addresses']:
-            validated_addresses = []
-            for i, address in enumerate(data['addresses']):
-                try:
-                    validated_address = CustomerValidator.validate_address_data(address)
-                    validated_addresses.append(validated_address)
-                except ValidationError as e:
-                    raise ValidationError(f"Помилка в адресі {i + 1}: {e.message}", field=f"addresses[{i}]")
-            validated_data['addresses'] = validated_addresses
-
-        # Копіювати інші поля без змін
-        for key, value in data.items():
-            if key not in validated_data:
-                validated_data[key] = value
-
-        return validated_data
-
-    @staticmethod
-    def validate_address_data(data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Валідація даних адреси клієнта.
-
-        Args:
-            data: Дані адреси для валідації
-
-        Returns:
-            Валідні дані адреси
-
-        Raises:
-            ValidationError: Якщо дані невалідні
-        """
-        validated_data = {}
-
-        # Обов'язкові поля для адреси
-        required_fields = ['firstname', 'lastname', 'street', 'city', 'postcode', 'country_id']
-
-        for field in required_fields:
-            if field not in data or not data[field]:
-                field_names = {
-                    'firstname': "Ім'я",
-                    'lastname': "Прізвище",
-                    'street': "Вулиця",
-                    'city': "Місто",
-                    'postcode': "Поштовий індекс",
-                    'country_id': "Код країни"
-                }
-                raise ValidationError(f"{field_names.get(field, field)} є обов'язковим полем для адреси", field=field)
-
-        validated_data['firstname'] = data['firstname'].strip()
-        validated_data['lastname'] = data['lastname'].strip()
-        validated_data['city'] = data['city'].strip()
-        validated_data['postcode'] = data['postcode'].strip()
-        validated_data['country_id'] = data['country_id'].strip().upper()
-
-        # Вулиця має бути списком
-        if isinstance(data['street'], str):
-            validated_data['street'] = [data['street'].strip()]
-        elif isinstance(data['street'], list):
-            validated_data['street'] = [s.strip() for s in data['street'] if s.strip()]
-        else:
-            raise ValidationError("Вулиця має бути рядком або списком рядків", field="street", value=data['street'])
-
-        # Валідація коду країни (ISO 2-letter code)
-        if len(validated_data['country_id']) != 2:
-            raise ValidationError("Код країни має бути 2-символьним (ISO)", field="country_id",
-                                  value=data['country_id'])
-
-        # Додаткові поля
-        if 'company' in data and data['company']:
-            validated_data['company'] = data['company'].strip()
-
-        if 'telephone' in data and data['telephone']:
-            validated_data['telephone'] = validate_phone(data['telephone'])
-
-        if 'fax' in data and data['fax']:
-            validated_data['fax'] = validate_phone(data['fax'])
-
-        if 'middlename' in data and data['middlename']:
-            validated_data['middlename'] = data['middlename'].strip()
-
-        if 'prefix' in data and data['prefix']:
-            validated_data['prefix'] = data['prefix'].strip()
-
-        if 'suffix' in data and data['suffix']:
-            validated_data['suffix'] = data['suffix'].strip()
-
-        if 'vat_id' in data and data['vat_id']:
-            validated_data['vat_id'] = data['vat_id'].strip()
-
-        if 'region' in data and data['region']:
-            validated_data['region'] = data['region'].strip()
-
-        if 'region_id' in data and data['region_id'] is not None:
-            region_id = int(data['region_id'])
-            if region_id < 0:
-                raise ValidationError("ID регіону не може бути від'ємним", field="region_id", value=data['region_id'])
-            validated_data['region_id'] = region_id
-
-        # Булеві поля
-        validated_data['default_shipping'] = bool(data.get('default_shipping', False))
-        validated_data['default_billing'] = bool(data.get('default_billing', False))
-
-        # Копіювати інші поля без змін
-        for key, value in data.items():
-            if key not in validated_data:
-                validated_data[key] = value
-
-        return validated_data
-
-
-class OrderValidator:
-    """Валідатор для замовлень."""
-
-    @staticmethod
-    def validate_order_data(data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Валідація даних замовлення.
-
-        Args:
-            data: Дані замовлення для валідації
-
-        Returns:
-            Валідні дані замовлення
-
-        Raises:
-            ValidationError: Якщо дані невалідні
-        """
-        validated_data = {}
-
-        # Валідація статусу замовлення
-        if 'status' in data:
-            valid_statuses = [
-                'pending', 'processing', 'complete', 'canceled',
-                'closed', 'fraud', 'holded', 'payment_review'
-            ]
-            if data['status'] not in valid_statuses:
-                raise ValidationError(f"Невалідний статус замовлення. Допустимі: {', '.join(valid_statuses)}",
-                                      field="status", value=data['status'])
-            validated_data['status'] = data['status']
-
-        # Валідація стану замовлення
-        if 'state' in data:
-            valid_states = ['new', 'pending_payment', 'processing', 'complete', 'canceled', 'closed']
-            if data['state'] not in valid_states:
-                raise ValidationError(f"Невалідний стан замовлення. Допустимі: {', '.join(valid_states)}",
-                                      field="state", value=data['state'])
-            validated_data['state'] = data['state']
-
-        # Валідація email клієнта
-        if 'customer_email' in data and data['customer_email']:
-            validated_data['customer_email'] = validate_email(data['customer_email'])
-
-        # Валідація фінансових полів
-        financial_fields = [
-            'base_grand_total', 'grand_total', 'base_subtotal', 'subtotal',
-            'base_tax_amount', 'tax_amount', 'base_shipping_amount', 'shipping_amount',
-            'base_discount_amount', 'discount_amount'
-        ]
-
-        for field in financial_fields:
-            if field in data and data[field] is not None:
-                try:
-                    validated_data[field] = validate_price(data[field])
-                except ValidationError as e:
-                    raise ValidationError(f"Помилка в полі {field}: {e.message}", field=field, value=data[field])
-
-        # Валідація валют
-        if 'base_currency_code' in data:
-            currency = data['base_currency_code'].upper()
-            if len(currency) != 3:
-                raise ValidationError("Код валюти має бути 3-символьним", field="base_currency_code",
-                                      value=data['base_currency_code'])
-            validated_data['base_currency_code'] = currency
-
-        if 'order_currency_code' in data:
-            currency = data['order_currency_code'].upper()
-            if len(currency) != 3:
-                raise ValidationError("Код валюти має бути 3-символьним", field="order_currency_code",
-                                      value=data['order_currency_code'])
-            validated_data['order_currency_code'] = currency
-
-        # Валідація товарів замовлення
-        if 'items' in data and data['items']:
-            validated_items = []
-            for i, item in enumerate(data['items']):
-                try:
-                    validated_item = OrderValidator.validate_order_item_data(item)
-                    validated_items.append(validated_item)
-                except ValidationError as e:
-                    raise ValidationError(f"Помилка в товарі {i + 1}: {e.message}", field=f"items[{i}]")
-            validated_data['items'] = validated_items
-
-        # Копіювати інші поля без змін
-        for key, value in data.items():
-            if key not in validated_data:
-                validated_data[key] = value
-
-        return validated_data
-
-    @staticmethod
-    def validate_order_item_data(data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Валідація даних товару в замовленні.
-
-        Args:
-            data: Дані товару в замовленні
-
-        Returns:
-            Валідні дані товару
-
-        Raises:
-            ValidationError: Якщо дані невалідні
-        """
-        validated_data = {}
-
-        # Обов'язкові поля
-        if 'sku' not in data or not data['sku']:
-            raise ValidationError("SKU товару є обов'язковим", field="sku")
-        validated_data['sku'] = validate_sku(data['sku'])
-
-        if 'name' not in data or not data['name']:
-            raise ValidationError("Назва товару є обов'язковою", field="name")
-        validated_data['name'] = data['name'].strip()
-
-        # Валідація кількості
-        if 'qty_ordered' in data:
-            try:
-                qty = Decimal(str(data['qty_ordered']))
-                if qty < 0:
-                    raise ValidationError("Кількість не може бути від'ємною", field="qty_ordered",
-                                          value=data['qty_ordered'])
-                validated_data['qty_ordered'] = qty
-            except (InvalidOperation, ValueError):
-                raise ValidationError("Невалідний формат кількості", field="qty_ordered", value=data['qty_ordered'])
-
-        # Валідація цін
-        price_fields = ['price', 'row_total', 'base_price', 'base_row_total']
-        for field in price_fields:
-            if field in data and data[field] is not None:
-                try:
-                    validated_data[field] = validate_price(data[field])
-                except ValidationError as e:
-                    raise ValidationError(f"Помилка в полі {field}: {e.message}", field=field, value=data[field])
-
-        # Валідація типу товару
-        if 'product_type' in data:
-            valid_types = ['simple', 'configurable', 'grouped', 'virtual', 'bundle', 'downloadable']
-            if data['product_type'] not in valid_types:
-                raise ValidationError(f"Невалідний тип товару. Допустимі: {', '.join(valid_types)}",
-                                      field="product_type", value=data['product_type'])
-            validated_data['product_type'] = data['product_type']
-
-        # Копіювати інші поля без змін
-        for key, value in data.items():
-            if key not in validated_data:
-                validated_data[key] = value
-
-        return validated_data
-
-
-def validate_magento_data(entity_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
+def validate_attribute_set_id(attribute_set_id: Union[int, str]) -> bool:
     """
-    Універсальна функція валідації даних для різних типів сутностей Magento.
+    Валідує ID набору атрибутів.
 
     Args:
-        entity_type: Тип сутності ('product', 'customer', 'order')
-        data: Дані для валідації
+        attribute_set_id: ID набору атрибутів
 
     Returns:
-        Валідні дані
+        True якщо ID валідний
 
     Raises:
-        ValidationError: Якщо дані невалідні
+        ValidationError: Якщо ID не валідний
     """
-    validators = {
-        'product': ProductValidator.validate_product_data,
-        'customer': CustomerValidator.validate_customer_data,
-        'order': OrderValidator.validate_order_data
-    }
-
-    if entity_type not in validators:
-        raise ValidationError(f"Невідомий тип сутності: {entity_type}")
-
-    return validators[entity_type](data)
-
-
-# Приклади використання
-if __name__ == "__main__":
-    # Приклад валідації товару
     try:
-        product_data = {
-            'sku': 'test-product-001',
-            'name': 'Тестовий товар',
-            'price': '99.99',
-            'status': 1,
-            'visibility': 4
-        }
+        id_int = int(attribute_set_id)
+    except (ValueError, TypeError):
+        raise ValidationError("ID набору атрибутів має бути числом", "attribute_set_id")
 
-        validated_product = ProductValidator.validate_product_data(product_data)
-        print("Товар валідний:", validated_product)
+    if id_int <= 0:
+        raise ValidationError("ID набору атрибутів має бути додатнім числом", "attribute_set_id")
 
-    except ValidationError as e:
-        print(f"Помилка валідації товару: {e}")
+    return True
 
-    # Приклад валідації клієнта
+
+def validate_product_type(product_type: str) -> bool:
+    """
+    Валідує тип товару.
+
+    Args:
+        product_type: Тип товару
+
+    Returns:
+        True якщо тип валідний
+
+    Raises:
+        ValidationError: Якщо тип не валідний
+    """
+    valid_types = [
+        'simple',
+        'configurable',
+        'grouped',
+        'virtual',
+        'bundle',
+        'downloadable'
+    ]
+
+    if product_type not in valid_types:
+        raise ValidationError(
+            f"Невалідний тип товару. Доступні: {', '.join(valid_types)}",
+            "product_type"
+        )
+
+    return True
+
+
+def validate_product_data(data: Dict[str, Any]) -> bool:
+    """
+    Валідує дані товару.
+
+    Args:
+        data: Дані товару
+
+    Returns:
+        True якщо всі дані валідні
+
+    Raises:
+        ValidationError: Якщо якісь дані не валідні
+    """
+    # Обов'язкові поля
+    required_fields = ['sku', 'name', 'attribute_set_id', 'type_id']
+
+    for field in required_fields:
+        if field not in data or not data[field]:
+            raise ValidationError(f"Поле '{field}' є обов'язковим", field)
+
+    # Валідація окремих полів
+    validate_sku(data['sku'])
+    validate_attribute_set_id(data['attribute_set_id'])
+    validate_product_type(data['type_id'])
+
+    # Опціональні поля
+    if 'price' in data and data['price'] is not None:
+        validate_price(data['price'])
+
+    if 'weight' in data:
+        validate_weight(data['weight'])
+
+    if 'status' in data:
+        validate_status(data['status'])
+
+    if 'visibility' in data:
+        validate_visibility(data['visibility'])
+
+    if 'url_key' in data:
+        validate_url_key(data['url_key'])
+
+    return True
+
+
+def validate_customer_data(data: Dict[str, Any]) -> bool:
+    """
+    Валідує дані клієнта.
+
+    Args:
+        data: Дані клієнта
+
+    Returns:
+        True якщо всі дані валідні
+
+    Raises:
+        ValidationError: Якщо якісь дані не валідні
+    """
+    # Обов'язкові поля
+    required_fields = ['email', 'firstname', 'lastname']
+
+    for field in required_fields:
+        if field not in data or not data[field]:
+            raise ValidationError(f"Поле '{field}' є обов'язковим", field)
+
+    # Валідація email
+    validate_email_address(data['email'])
+
+    # Валідація імені та прізвища
+    if len(data['firstname']) < 1 or len(data['firstname']) > 255:
+        raise ValidationError("Ім'я має бути від 1 до 255 символів", "firstname")
+
+    if len(data['lastname']) < 1 or len(data['lastname']) > 255:
+        raise ValidationError("Прізвище має бути від 1 до 255 символів", "lastname")
+
+    # Валідація телефону (якщо вказаний)
+    if 'telephone' in data and data['telephone']:
+        validate_phone(data['telephone'])
+
+    return True
+
+
+def validate_search_criteria(criteria: Dict[str, Any]) -> bool:
+    """
+    Валідує критерії пошуку.
+
+    Args:
+        criteria: Критерії пошуку
+
+    Returns:
+        True якщо критерії валідні
+
+    Raises:
+        ValidationError: Якщо критерії не валідні
+    """
+    # Валідація page_size
+    if 'page_size' in criteria:
+        try:
+            page_size = int(criteria['page_size'])
+            if page_size <= 0 or page_size > 1000:
+                raise ValidationError(
+                    "page_size має бути від 1 до 1000",
+                    "page_size"
+                )
+        except (ValueError, TypeError):
+            raise ValidationError("page_size має бути числом", "page_size")
+
+    # Валідація current_page
+    if 'current_page' in criteria:
+        try:
+            current_page = int(criteria['current_page'])
+            if current_page <= 0:
+                raise ValidationError(
+                    "current_page має бути додатнім числом",
+                    "current_page"
+                )
+        except (ValueError, TypeError):
+            raise ValidationError("current_page має бути числом", "current_page")
+
+    return True
+
+    if not re.match(email_pattern, email):
+        raise ValidationError("Невалідний формат email адреси", "email")
+
+    # Додаткові перевірки
+    if len(email) > 254:  # RFC 5321
+        raise ValidationError("Email адреса занадто довга", "email")
+
+    local_part, domain = email.rsplit('@', 1)
+
+    if len(local_part) > 64:  # RFC 5321
+        raise ValidationError("Локальна частина email занадто довга", "email")
+
+    if len(domain) > 253:  # RFC 1035
+        raise ValidationError("Доменна частина email занадто довга", "email")
+
+    return True
+
+
+def validate_phone(phone: str, country_code: str = "UA") -> bool:
+    """
+    Валідує номер телефону.
+
+    Args:
+        phone: Номер телефону
+        country_code: Код країни
+
+    Returns:
+        True якщо номер валідний
+
+    Raises:
+        ValidationError: Якщо номер не валідний
+    """
+    if not phone:
+        raise ValidationError("Номер телефону не може бути порожнім", "phone")
+
+    # Видаляємо всі символи крім цифр і +
+    clean_phone = re.sub(r'[^\d+]', '', phone)
+
+    if country_code == "UA":
+        # Українські номери: +380XXXXXXXXX або 380XXXXXXXXX або 0XXXXXXXXX
+        patterns = [
+            r'^\+380\d{9}$',  # +380XXXXXXXXX
+            r'^380\d{9}$',    # 380XXXXXXXXX
+            r'^0\d{9}$'       # 0XXXXXXXXX
+        ]
+
+        if not any(re.match(pattern, clean_phone) for pattern in patterns):
+            raise ValidationError(
+                "Невалідний український номер телефону. "
+                "Формат: +380XXXXXXXXX, 380XXXXXXXXX або 0XXXXXXXXX",
+                "phone"
+            )
+    else:
+        # Загальна перевірка міжнародних номерів
+        if not re.match(r'^\+?\d{7,15}$', clean_phone):
+            raise ValidationError(
+                "Невалідний номер телефону. Має містити від 7 до 15 цифр",
+                "phone"
+            )
+
+    return True
+
+
+def validate_price(price: Union[int, float, str]) -> bool:
+    """
+    Валідує ціну.
+
+    Args:
+        price: Ціна для валідації
+
+    Returns:
+        True якщо ціна валідна
+
+    Raises:
+        ValidationError: Якщо ціна не валідна
+    """
+    if price is None:
+        raise ValidationError("Ціна не може бути None", "price")
+
     try:
-        customer_data = {
-            'email': 'test@example.com',
-            'firstname': 'Іван',
-            'lastname': 'Петренко',
-            'addresses': [{
-                'firstname': 'Іван',
-                'lastname': 'Петренко',
-                'street': ['вул. Хрещатик, 1'],
-                'city': 'Київ',
-                'postcode': '01001',
-                'country_id': 'UA',
-                'telephone': '+380501234567',
-                'default_shipping': True,
-                'default_billing': True
-            }]
-        }
+        price_float = float(price)
+    except (ValueError, TypeError):
+        raise ValidationError("Ціна має бути числом", "price")
 
-        validated_customer = CustomerValidator.validate_customer_data(customer_data)
-        print("Клієнт валідний:", validated_customer)
+    if price_float < 0:
+        raise ValidationError("Ціна не може бути від'ємною", "price")
 
-    except ValidationError as e:
-        print(f"Помилка валідації клієнта: {e}")
+    if price_float > 999999999.99:
+        raise ValidationError("Ціна занадто велика", "price")
+
+    # Перевіряємо кількість десяткових знаків
+    price_str = str(price_float)
+    if '.' in price_str:
+        decimal_places = len(price_str.split('.')[1])
+        if decimal_places > 4:
+            raise ValidationError("Ціна може мати максимум 4 десяткові знаки", "price")
+
+    return True
+
+
+def validate_weight(weight: Union[int, float, str]) -> bool:
+    """
+    Валідує вагу товару.
+
+    Args:
+        weight: Вага для валідації
+
+    Returns:
+        True якщо вага валідна
+
+    Raises:
+        ValidationError: Якщо вага не валідна
+    """
+    if weight is None:
+        return True  # Вага може бути None
+
+    try:
+        weight_float = float(weight)
+    except (ValueError, TypeError):
+        raise ValidationError("Вага має бути числом", "weight")
+
+    if weight_float < 0:
+        raise ValidationError("Вага не може бути від'ємною", "weight")
+
+    if weight_float > 999999:
+        raise ValidationError("Вага занадто велика", "weight")
+
+    return True
+
+
+def validate_status(status: Union[int, str]) -> bool:
+    """
+    Валідує статус товару.
+
+    Args:
+        status: Статус (1 - активний, 2 - неактивний)
+
+    Returns:
+        True якщо статус валідний
+
+    Raises:
+        ValidationError: Якщо статус не валідний
+    """
+    try:
+        status_int = int(status)
+    except (ValueError, TypeError):
+        raise ValidationError("Статус має бути числом", "status")
+
+    if status_int not in [1, 2]:
+        raise ValidationError("Статус має бути 1 (активний) або 2 (неактивний)", "status")
+
+    return True
+
+
+def validate_visibility(visibility: Union[int, str]) -> bool:
+    """
+    Валідує видимість товару.
+
+    Args:
+        visibility: Видимість (1-4)
+
+    Returns:
+        True якщо видимість валідна
+
+    Raises:
+        ValidationError: Якщо видимість не валідна
+    """
+    try:
+        visibility_int = int(visibility)
+    except (ValueError, TypeError):
+        raise ValidationError("Видимість має бути числом", "visibility")
+
+    # 1 - Not Visible Individually
+    # 2 - Catalog
+    # 3 - Search
+    # 4 - Catalog, Search
+    if visibility_int not in [1, 2, 3, 4]:
+        raise ValidationError("Видимість має бути від 1 до 4", "visibility")
+
+    return True
+
+
+def validate_url_key(url_key: str) -> bool:
+    """
+    Валідує URL ключ.
+
+    Args:
+        url_key: URL ключ для валідації
+
+    Returns:
+        True якщо URL ключ валідний
+
+    Raises:
+        ValidationError: Якщо URL ключ не валідний
+    """
+    if not url_key:
+        return True  # URL ключ може бути порожнім
+
+    if not isinstance(url_key, str):
+        raise ValidationError("URL ключ має бути рядком", "url_key")
+
+    if len(url_key) > 255:
+        raise ValidationError("URL ключ занадто довгий (максимум 255 символів)", "url_key")
+
+    # URL ключ може містити тільки літери, цифри та дефіси
+    if not re.match(r'^[a-z0-9-]+$', url_key):
+        raise ValidationError(
+            "URL ключ може містити тільки малі літери, цифри та дефіси",
+            "url_key"
+        )
+
+    # Не може починатися або закінчуватися дефісом
+    if url_key.startswith('-') or url_key.endswith('-'):
+        raise ValidationError(
+            "URL ключ не може починатися або закінчуватися дефісом",
+            "url_key"
+        )
+
+    # Не може містити подвійні дефіси
+    if '--' in url_key:
+        raise ValidationError("URL ключ не може містити подвійні дефіси", "url_key")
+
+    return True
+
+
+def validate_attribute_set_id(attribute_set_id: Union[int, str]) -> bool:
+    """
+    Валідує ID набору атрибутів.
+
+    Args:
+        attribute_set_id: ID набору атрибутів
+
+    Returns:
+        True якщо ID валідний
+
+    Raises:
+        ValidationError: Якщо ID не валідний
+    """
+    try:
+        id_int = int(attribute_set_id)
+    except (ValueError, TypeError):
+        raise ValidationError("ID набору атрибутів має бути числом", "attribute_set_id")
+
+    if id_int <= 0:
+        raise ValidationError("ID набору атрибутів має бути додатнім числом", "attribute_set_id")
+
+    return True
+
+
+def validate_product_type(product_type: str) -> bool:
+    """
+    Валідує тип товару.
+
+    Args:
+        product_type: Тип товару
+
+    Returns:
+        True якщо тип валідний
+
+    Raises:
+        ValidationError: Якщо тип не валідний
+    """
+    valid_types = [
+        'simple',
+        'configurable',
+        'grouped',
+        'virtual',
+        'bundle',
+        'downloadable'
+    ]
+
+    if product_type not in valid_types:
+        raise ValidationError(
+            f"Невалідний тип товару. Доступні: {', '.join(valid_types)}",
+            "product_type"
+        )
+
+    return True
+
+
+def validate_product_data(data: Dict[str, Any]) -> bool:
+    """
+    Валідує дані товару.
+
+    Args:
+        data: Дані товару
+
+    Returns:
+        True якщо всі дані валідні
+
+    Raises:
+        ValidationError: Якщо якісь дані не валідні
+    """
+    # Обов'язкові поля
+    required_fields = ['sku', 'name', 'attribute_set_id', 'type_id']
+
+    for field in required_fields:
+        if field not in data or not data[field]:
+            raise ValidationError(f"Поле '{field}' є обов'язковим", field)
+
+    # Валідація окремих полів
+    validate_sku(data['sku'])
+    validate_attribute_set_id(data['attribute_set_id'])
+    validate_product_type(data['type_id'])
+
+    # Опціональні поля
+    if 'price' in data and data['price'] is not None:
+        validate_price(data['price'])
+
+    if 'weight' in data:
+        validate_weight(data['weight'])
+
+    if 'status' in data:
+        validate_status(data['status'])
+
+    if 'visibility' in data:
+        validate_visibility(data['visibility'])
+
+    if 'url_key' in data:
+        validate_url_key(data['url_key'])
+
+    return True
+
+
+def validate_customer_data(data: Dict[str, Any]) -> bool:
+    """
+    Валідує дані клієнта.
+
+    Args:
+        data: Дані клієнта
+
+    Returns:
+        True якщо всі дані валідні
+
+    Raises:
+        ValidationError: Якщо якісь дані не валідні
+    """
+    # Обов'язкові поля
+    required_fields = ['email', 'firstname', 'lastname']
+
+    for field in required_fields:
+        if field not in data or not data[field]:
+            raise ValidationError(f"Поле '{field}' є обов'язковим", field)
+
+    # Валідація email
+    validate_email_address(data['email'])
+
+    # Валідація імені та прізвища
+    if len(data['firstname']) < 1 or len(data['firstname']) > 255:
+        raise ValidationError("Ім'я має бути від 1 до 255 символів", "firstname")
+
+    if len(data['lastname']) < 1 or len(data['lastname']) > 255:
+        raise ValidationError("Прізвище має бути від 1 до 255 символів", "lastname")
+
+    # Валідація телефону (якщо вказаний)
+    if 'telephone' in data and data['telephone']:
+        validate_phone(data['telephone'])
+
+    return True
+
+
+def validate_search_criteria(criteria: Dict[str, Any]) -> bool:
+    """
+    Валідує критерії пошуку.
+
+    Args:
+        criteria: Критерії пошуку
+
+    Returns:
+        True якщо критерії валідні
+
+    Raises:
+        ValidationError: Якщо критерії не валідні
+    """
+    # Валідація page_size
+    if 'page_size' in criteria:
+        try:
+            page_size = int(criteria['page_size'])
+            if page_size <= 0 or page_size > 1000:
+                raise ValidationError(
+                    "page_size має бути від 1 до 1000",
+                    "page_size"
+                )
+        except (ValueError, TypeError):
+            raise ValidationError("page_size має бути числом", "page_size")
+
+    # Валідація current_page
+    if 'current_page' in criteria:
+        try:
+            current_page = int(criteria['current_page'])
+            if current_page <= 0:
+                raise ValidationError(
+                    "current_page має бути додатнім числом",
+                    "current_page"
+                )
+        except (ValueError, TypeError):
+            raise ValidationError("current_page має бути числом", "current_page")
+
+    return True
